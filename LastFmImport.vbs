@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.12"
+  Dim Version : Version = "2.0"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -23,6 +23,9 @@ Option Explicit
 ' Language=VBScript
 ' ScriptType=0 
 '
+'
+' Changes: 2.0
+' - Added support for updating last played times - these will be up to a week out though
 '
 ' Changes: 1.12
 ' - Fix: More graceful xml checking, should catch ALL Invalid characters
@@ -76,18 +79,23 @@ Option Explicit
 ' - Pretty error messages
 '
 'ToDo:
-'* Smarter checking of files to update
-'* Update LastPlayed time as well (if none exists)
-'* Fix the update file writing to account for strange characters
+'* Better UI
+'* ???
 
 Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
+
+Class TrackDetailsContainer
+	Public Plays
+	Public LastPlayed
+End Class
+
 
 
 Sub LastFMImport
 	' Define variables
 	Dim TrackChartXML, ChartListXML, DStart, DEnd, ArtistsL, TracksL
 	' Stats variables
-	Dim Plays, Matches, Counter, Updated, Tracks, Artists, ArtistMatches, LastMatch
+	Dim Plays, Matches, Counter, Updated, Tracks, Artists, ArtistMatches, LastMatch, TrackDetails, LastPlayed
 	' Update logfile variables
 	Dim fso, updatef
 
@@ -99,14 +107,23 @@ Sub LastFMImport
   
 	StatusBar.Text = "Getting UserName"
 
-	dim uname
+	dim uname, updateLastPlayed
 	uname=InputBox("Enter your Last.fm username:")
+	' 6 = yes, 7 = no
+	If MsgBox("Update Last Played Times?",4) = 7 Then
+		updateLastPlayed = False
+	Else
+		updateLastPlayed = True
+	End If
+
+
 
 	If uname = "" Then
 		Exit Sub
 	End If
 
 	Set ArtistsL = CreateObject("Scripting.Dictionary")
+	
 
 	StatusBar.Text = "Loading Weekly Charts List"
 	Set ChartListXML = LoadXML(uname, "ChartList","","")
@@ -126,6 +143,7 @@ Sub LastFMImport
 
 
 		Plays = 0
+
 		Counter = 0
 		StatusBar.MaxValue = ChartListXML.getElementsByTagName("lfm").item(0).getElementsByTagName("weeklychartlist").item(0).getElementsByTagName("chart").length
 
@@ -153,7 +171,7 @@ Sub LastFMImport
 					Exit Sub
 				End If
 				'logme "TrackChartXML appears to be OK, proceeding"
-				Dim Ele, TrackTitle, ArtistName, PlayCount
+				Dim Ele, TrackTitle, ArtistName, PlayCount, PlayDate
 
 			
 				For Each Ele in TrackChartXML.GetElementsByTagName("lfm").item(0).GetElementsByTagName("track")
@@ -162,20 +180,35 @@ Sub LastFMImport
 					ArtistName = Ele.ChildNodes(0).ChildNodes(0).Text
 					PlayCount = CInt(Ele.ChildNodes(3).Text)
 
+
 					Plays = Plays + PlayCount
 
 					'logme " < Searching for:> " &   ArtistName & " - " & TrackTitle & " = " & PlayCount & " Plays"
 
 					If ArtistsL.Exists(ArtistName) Then
 						If ArtistsL.Item(ArtistName).Exists(TrackTitle) Then
-							ArtistsL.Item(ArtistName).Item(TrackTitle) = ArtistsL.Item(ArtistName).Item(TrackTitle) + PlayCount
+							'ArtistsL.Item(ArtistName).Item(TrackTitle) = ArtistsL.Item(ArtistName).Item(TrackTitle) + PlayCount
+							
+							ArtistsL.Item(ArtistName).Item(TrackTitle).Plays = ArtistsL.Item(ArtistName).Item(TrackTitle).Plays + PlayCount
+							ArtistsL.Item(ArtistName).Item(TrackTitle).LastPlayed = UnixToWin(DStart)
+
+							
 						Else
-							ArtistsL.Item(ArtistName).Add TrackTitle,PlayCount
+							'ArtistsL.Item(ArtistName).Add TrackTitle,PlayCount
+							Set TrackDetails = New TrackDetailsContainer
+							TrackDetails.Plays = PlayCount
+							TrackDetails.LastPlayed = UnixToWin(DStart)
+							ArtistsL.Item(ArtistName).Add TrackTitle,TrackDetails
+
 						End If
 					Else
 						Dim temp
 						Set temp = CreateObject("Scripting.Dictionary")
-						temp.Add TrackTitle,PlayCount
+						Set TrackDetails = New TrackDetailsContainer
+						TrackDetails.Plays = PlayCount
+						TrackDetails.LastPlayed = UnixToWin(DStart)
+						'temp.Add TrackTitle,PlayCount
+						temp.Add TrackTitle,TrackDetails
 						ArtistsL.Add ArtistName, temp
 
 					End If
@@ -217,7 +250,7 @@ Sub LastFMImport
 	Set fso = CreateObject("Scripting.FileSystemObject")
 	Set updatef = fso.OpenTextFile(Script.ScriptPath&".Updated.txt",ForWriting,True)
 
-	updatef.WriteLine "Artist" & VBTab & "Track" & VBTab & "New Plays" & VBTab & "Old Plays"
+	updatef.WriteLine "Artist" & VBTab & "Track" & VBTab & "New Plays / Timestamp" & VBTab & "Old Plays / Timestamp"
 	For Each ArtistName In ArtistsL.Keys
 		Dim list, ArtistTrackList
 		SDB.ProcessMessages
@@ -260,52 +293,64 @@ Sub LastFMImport
 				' Check if this track was on last.fm
 
 				If ArtistTrackList.Exists(LCase(Item.Title)) Then
+					Dim thisUpdated
+					thisUpdated = false
 					SDB.ProcessMessages
-					PlayCount = ArtistTrackList.Item(LCase(Item.Title))
+					PlayCount = ArtistTrackList.Item(LCase(Item.Title)).Plays
+					LastPlayed = ArtistTrackList.Item(LCase(Item.Title)).LastPlayed
+
 					SDB.ProcessMessages
 
 					Matches = Matches + 1
 
+					'logme " === Found: " & ArtistName & " - " & Item.Title & " PlayCount = " & PlayCount
 					logme " === Found: " & ArtistName & " - " & Item.Title & " PlayCount = " & PlayCount
 					logme " === Previous plays: " & Item.PlayCounter
 					logme " === LastPlayed: " & Item.LastPlayed
+					logme " === LastPlayed by last.fm " & LastPlayed 
 
+					'If Item.PlayCounter < PlayCount Then 'Increase play count 
 					If Item.PlayCounter < PlayCount Then 'Increase play count 
-						LastMatch = " - Updating: " & ArtistName & " - " & Item.Title
-						Updated = Updated + 1
 
-						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & " Tracks " & LastMatch
+						thisUpdated = true
 						
-						'Unfortunatly, some files can be updated with wierd tags, yet cause errors when writing status file
-						On Error Resume Next
-						updatef.WriteLine ArtistName & VBTab & Item.Title & VBTab & PlayCount & VBTab & list.Item(x).PlayCounter
-						If Err.Number <> 0 Then 
-							numErr =Err.Number
-							aboutErr = Err.description
-							MsgBox "An Error has occured! Error number " & numerr & " of the type '" & abouterr & "'." & VbCrLf &_
-								"Current artist was updated, but cannot be written to logfile."
-							Err.Clear
-						End If
-						On Error Goto 0
+						logstatus ArtistName & VBTab & Item.Title & VBTab & PlayCount & VBTab & list.Item(x).PlayCounter, updatef
 						logme ArtistName & VBTab & Item.Title & VBTab & PlayCount & VBTab & list.Item(x).PlayCounter
 						
-						SDB.ProcessMessages						' Uncomment below to update LastPlayed times to now.
-						' list.item(x).LastPlayed=now()
+						SDB.ProcessMessages					
+
 						list.Item(x).PlayCounter = PlayCount
 						SDB.ProcessMessages
 						
 						
 						logme " ==== Updating"
 						SDB.ProcessMessages
-						Item.UpdateDB()
-					ElseIf Item.LastPlayed = 0.0 Then
-							logme "Empty Last played"
-					Else
-						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & " Tracks " & LastMatch
-						'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_								" -> SKIP: " & ArtistName & " - " & Item.Title
-						'logme " ==== Skipping"
+						
+					End If
+
+					' Update last played if we said to
+					If updateLastPlayed And ( Item.LastPlayed = 0.0 Or DateDiff("s",Item.LastPlayed,LastPlayed) > 0 ) Then
+						
+						thisUpdated = true
+						
+						logstatus ArtistName & VBTab & Item.Title & VBTab & LastPlayed & VBTab & list.Item(x).LastPlayed, updatef
+						logme ArtistName & VBTab & Item.Title & VBTab & LastPlayed & VBTab & list.Item(x).LastPlayed
+										
+						SDB.ProcessMessages
+						
+						Item.LastPlayed = LastPlayed
+						
 						SDB.ProcessMessages
 
+					End If
+					
+
+					If thisUpdated Then
+						LastMatch = " - Updating: " & ArtistName & " - " & Item.Title
+						Updated = Updated + 1
+						Item.UpdateDB()
+
+						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & " Tracks " & LastMatch
 					End If
 					SDB.ProcessMessages
 				Else
@@ -518,6 +563,21 @@ Sub logme(msg)
 	End If
 End Sub
 
+Sub logstatus(msg,updatef)
+
+	'Unfortunatly, some files can be updated with wierd tags, yet cause errors when writing status file
+	On Error Resume Next
+	updatef.WriteLine msg
+	If Err.Number <> 0 Then 
+		numErr =Err.Number
+		aboutErr = Err.description
+		MsgBox "An Error has occured! Error number " & numerr & " of the type '" & abouterr & "'." & VbCrLf &_
+			"Current artist was updated, but cannot be written to logfile."
+		Err.Clear
+	End If
+	On Error Goto 0
+
+End Sub
 
 
 Function CorrectSt(inString)
@@ -600,7 +660,9 @@ Function stripInvalid(str)
 	stripInvalid = newStr
 End Function 
 
-
+Function UnixToWin(num)
+	UnixToWin = DateAdd("s",num,"1970/1/1")
+End Function
 
 
 '************************************************************'
