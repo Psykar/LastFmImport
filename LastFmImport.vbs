@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.2"
+  Dim Version : Version = "1.3"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -23,6 +23,11 @@ Option Explicit
 ' Language=VBScript
 ' ScriptType=0 
 '
+' Changes: 1.3
+' - Database lookup optimizations (I hope!)
+' - Added a few more stats to the process
+' - Cleaned logging so enabling should only print essential stats about updated files
+'
 ' Changes: 1.2
 ' - Status Bars!
 ' - Code Tidy Up
@@ -34,14 +39,14 @@ Option Explicit
 ' TODO: 
 ' * Smarter checking of files to update
 
-Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = True, Timeout = 25
+Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
 
 
 Sub LastFMImport
 	' Define variables
 	Dim TrackChartXML, ChartListXML, DStart, DEnd, ArtistsL, TracksL
 	' Stats variables
-	Dim Plays, Skipped, Matches, UniqueMatches, Counter
+	Dim Plays, Matches, Counter, Updated, Tracks, Artists, ArtistMatches
 
   
 	' Status Bar
@@ -66,7 +71,7 @@ Sub LastFMImport
 
 
 	If Not (ChartListXML Is Nothing) Then
-		logme " ChartListXML appears to be OK, proceeding with loading each weeks data"
+		'logme " ChartListXML appears to be OK, proceeding with loading each weeks data"
 		StatusBar.Text = "Loading Weekly Charts List -> OK"
 		Dim Elem
 
@@ -87,7 +92,7 @@ Sub LastFMImport
 			DEnd = Elem.getAttribute("to")
 
 
-			logme " Attributes: " & DStart & " " & DEnd
+			'logme " Attributes: " & DStart & " " & DEnd
 			Set TrackChartXML = LoadXML(uname, "TrackChart",DStart,DEnd)
 			SDB.ProcessMessages
 			If Not TrackChartXML.getElementsByTagName("lfm").item(0).getAttribute("status") = "ok" Then
@@ -97,7 +102,7 @@ Sub LastFMImport
 
 
 			If NOT (TrackChartXML Is Nothing) Then
-				logme "TrackChartXML appears to be OK, proceeding"
+				'logme "TrackChartXML appears to be OK, proceeding"
 				Dim Ele, TrackTitle, ArtistName, PlayCount
 
 			
@@ -109,7 +114,7 @@ Sub LastFMImport
 
 					Plays = Plays + PlayCount
 
-					logme " < Searching for:> " &   ArtistName & " - " & TrackTitle & " = " & PlayCount & " Plays"
+					'logme " < Searching for:> " &   ArtistName & " - " & TrackTitle & " = " & PlayCount & " Plays"
 
 					If ArtistsL.Exists(ArtistName) Then
 						If ArtistsL.Item(ArtistName).Exists(TrackTitle) Then
@@ -138,72 +143,84 @@ Sub LastFMImport
 		Next
 
 	Else
-		logme "TracksListXML did not appear to load.. check loadxml() or network connection"
+		'logme "TracksListXML did not appear to load.. check loadxml() or network connection"
 		msgbox ("Failed to get XML from LoadXML()")
 	End If
 
 
-
-
-	Skipped = 0
+	ArtistMatches = 0
 	Matches = 0
-	UniqueMatches = 0
 	Counter = 0
 	StatusBar.Value = 0
+	Updated = 0
+	Tracks = 0
+	Artists = ArtistsL.Count
 	StatusBar.MaxValue = ArtistsL.Count
 	StatusBar.Text = "Checking Database for Matches..."
 
 
 
 	For Each ArtistName In ArtistsL.Keys
-
+		Dim list
 		StatusBar.Increase
-		StatusBar.Text = "Checking Database for Artist Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName
+		StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName
 		If StatusBar.Terminate Then
 			Exit For
 		End If
-		For Each TrackTitle In ArtistsL.Item(ArtistName).Keys
-			Dim list
-			StatusBar.Text = "Checking Database for Artist Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName &_
-				" - " & TrackTitle
-			If StatusBar.Terminate Then
-				Exit For
-			End If
-			PlayCount = ArtistsL.Item(ArtistName).Item(TrackTitle)
 
-			Set list = QueryLibrary (ArtistName,TrackTitle)
-			If list.Count > 0 Then
+		Tracks = Tracks + ArtistsL.Item(ArtistName).Count
 
-				Dim x
+		'Get all tracks in database by this artist
+		Set list = QueryLibrary (ArtistName)
 
-				Matches = Matches + list.Count
-				UniqueMatches = UniqueMatches + 1
+		If list.Count > 0 Then
+			Dim x
+			
+			ArtistMatches = ArtistMatches + 1
 
-				logme " == Found:> " &   ArtistName & " - " & TrackTitle & " = " & PlayCount & " Plays"
-				For x = 0 to list.Count-1
+			For x = 0 To list.Count-1
+
+
+				
+				
+				StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName &_
+					" - " & list.Item(x).Title
+				If StatusBar.Terminate Then
+					Exit For
+				End If
+
+				' Check if this track was on last.fm
+				If ArtistsL.Item(ArtistName).Exists(list.Item(x).Title) Then
+					PlayCount = ArtistsL.Item(ArtistName).Item(list.Item(x).Title)
+						
+
+					Matches = Matches + 1
+
+					logme " === Found: " & ArtistName & " - " & list.Item(x).Title & " PlayCount = " & PlayCount
 					logme " === Previous plays: " & list.Item(x).PlayCounter
+
 					If list.Item(x).PlayCounter < PlayCount Then 'Increase play count 
-							StatusBar.Text = "Checking Database for Artist Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> MATCH: " & ArtistName &_
-								" - " & TrackTitle
+							StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_
+								" -> MATCH: " & ArtistName & " - " & TrackTitle
 						list.Item(x).PlayCounter = PlayCount
+						Updated = Updated + 1
 						logme " ==== Updating"
 					Else
-							StatusBar.Text = "Checking Database for Artist Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> SKIP: " & ArtistName &_
-								" - " & TrackTitle
-						Skipped = Skipped + 1
+							StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_
+								" -> SKIP: " & ArtistName & " - " & TrackTitle
 						logme " ==== Skipping"
+
 					End If
 					SDB.ProcessMessages
-				Next
-
-			End If
-			list.UpdateAll
-		Next
+				End If
+			Next
+		End If
+		list.UpdateAll
+		
 	Next
-
-	MsgBox "Matches to local = " & Matches & VbCrLf & "UNIQUE Matches to local = " & UniqueMatches &_
-		VbCrLf & "Plays found on Last.fm = " & Plays & VbCrLf & "Skipped as >= plays on last.fm = " &_
-		Skipped & VbCrLf & "Tracks updated = " & Matches - Skipped
+	MsgBox  Plays & " Plays found on Last.fm consisting of " & Tracks & " tracks by " & Artists & " artists." & VbCrLf &_
+		ArtistMatches & " of these artists were in the local database, along with " & Matches & " of their tracks." & VbCrLf &_
+		"Tracks updated = " & Updated & VbCrLf & " The rest had a play count higher than last.fm already."
 	
 	SDB.ProcessMessages
 
@@ -217,7 +234,7 @@ End Sub
 Function LoadXML(User,Mode,DFrom,DTo)
 	'LoadXML accepts input string and mode, returns xmldoc of requested string and mode'
 	'http://msdn2.microsoft.com/en-us/library/aa468547.aspx'
-	logme ">> LoadXML: Begin with " & User & " & " & Mode
+	'logme ">> LoadXML: Begin with " & User & " & " & Mode
 	Dim xmlDoc, xmlURL, StatusBar, LoadXMLBar, StartTimer, http
 	StartTimer = Timer
 
@@ -257,7 +274,7 @@ Function LoadXML(User,Mode,DFrom,DTo)
 		Set currNode = xmlDoc.documentElement.childNodes.Item(0)
 	End If
 
-	logme " xmlDoc.Load: Waiting for Last.FM to return " & Mode & " of " & User
+	'logme " xmlDoc.Load: Waiting for Last.FM to return " & Mode & " of " & User
 	SDB.ProcessMessages
 
 	
@@ -269,7 +286,7 @@ Function LoadXML(User,Mode,DFrom,DTo)
 
 
 
-	logme " xmlDoc: returned from loop in: " & (Timer - StartTimer)
+	'logme " xmlDoc: returned from loop in: " & (Timer - StartTimer)
 
 	If xmlDoc.readyState = 4 Then 'all ok
 		Set LoadXML = xmlDoc
@@ -281,7 +298,7 @@ Function LoadXML(User,Mode,DFrom,DTo)
 		Set LoadXML = Nothing 
 	End if
 
-	logme "<< LoadXML: Finished in --> " & Int(Timer-StartTimer)
+	'logme "<< LoadXML: Finished in --> " & Int(Timer-StartTimer)
 
 End Function
 
@@ -290,7 +307,7 @@ End Function
 '******************************************************************
 
 Function AddFilter()
-	'logme " AddFilter(): Begin"
+	''logme " AddFilter(): Begin"
 	'Add currently active filter to query if any'
 
 	Dim GetFilter : GetFilter = SDB.Database.ActiveFilterQuery  
@@ -298,11 +315,11 @@ Function AddFilter()
 		AddFilter = " AND " & GetFilter
 	End If
 	
-	'   logme " AddFilter(): exit with :> " & AddFilter
+	'   'logme " AddFilter(): exit with :> " & AddFilter
 	End Function
 
-	Function QueryLibrary(qArtist, qTitle) 'input artist, title... output songlist'
-	logme "QueryLibrary: begin with " & qArtist & ", " & qTitle
+Function QueryLibrary(qArtist) 'input artist, title... output songlist'
+	'logme "QueryLibrary: begin with " & qArtist
 	Dim Iter, Iter2, Qry, Qry2, StatusBar, tmpSongList
 	Set tmpSongList = SDB.NewSonglist
 
@@ -310,12 +327,11 @@ Function AddFilter()
 		CorrectST(qArtist) & "'"
 
 	'   Thanks to Bex for the improved qrys
-	Qry2 = "SongTitle = '" & CorrectST(qTitle) & "' "&_
-			"AND Songs.ID IN (SELECT IDSong FROM ArtistsSongs, Artists  WHERE "&_
+	Qry2 = 	"AND Songs.ID IN (SELECT IDSong FROM ArtistsSongs, Artists  WHERE "&_
 			"IDArtist=Artists.ID AND PersonType=1 AND " &_
 			"Artist = '" & CorrectST(qArtist) & "') " & AddFilter
 	'        "UpperW(TRIM(Artist)) = UpperW('" & CorrectST(qArtist) & "'))" & " " & Order
-	'   logme " QRY2 :> " & Qry2
+	'   'logme " QRY2 :> " & Qry2
 	SDB.Database.Commit
 	SDB.Database.BeginTransaction
 	Set Iter = SDB.Database.OpenSQL(Qry)
@@ -323,7 +339,7 @@ Function AddFilter()
 	Do While NOT Iter.EOF
 		SDB.ProcessMessages
 		'check artist exist first'
-		logme " found artist :> " & Iter.StringByIndex(1) & " for track " & qTitle
+		'logme " found artist :> " & Iter.StringByIndex(1)
 
 		Set Iter2 = SDB.Database.QuerySongs(Qry2)
 		SDB.Database.Commit
@@ -332,8 +348,8 @@ Function AddFilter()
 		Do While Not Iter2.EOF
 		  SDB.ProcessMessages
 		  tmpSongList.Add (Iter2.Item)
-		  logme " -->> Added: --->>> " & Iter2.Item.ArtistName & " - " & Iter2.Item.Title
-	'       logme Qry2
+		  'logme " -->> Added: --->>> " & Iter2.Item.ArtistName & " - " & Iter2.Item.Title
+	'       'logme Qry2
 	'           msgbox("pause")
 		  SDB.ProcessMessages
 		  Iter2.Next
@@ -371,16 +387,16 @@ Sub logme(msg)
 End Sub
 
 Function CorrectSt(inString)
-' 	logme ">> CorrectSt() has started with parameters: " & inString
+' 	'logme ">> CorrectSt() has started with parameters: " & inString
 	CorrectSt = Replace(inString, "'", "''")
 	CorrectSt = Replace(CorrectSt, """", """""")
-' 	logme "<< CorrectSt() will return: " & CorrectSt & " and exit"
+' 	'logme "<< CorrectSt() will return: " & CorrectSt & " and exit"
 End Function
 
 
 Function fixurl(sRawURL)
 	' Original psyxonova improved by trixmoto
-	logme ">> fixurl() entered with: " & sRawURL
+	'logme ">> fixurl() entered with: " & sRawURL
 	Const sValidChars = "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\/!&:."
 	sRawURL = Replace(sRawURL,"+","%2B")
 
@@ -424,7 +440,7 @@ Function fixurl(sRawURL)
 		SDB.ProcessMessages
     Loop
 	End If
-	logme "<< fixurl will return with: " & fixurl
+	'logme "<< fixurl will return with: " & fixurl
 End Function
 
 
