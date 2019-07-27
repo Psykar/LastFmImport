@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.11"
+  Dim Version : Version = "1.12"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -22,6 +22,10 @@ Option Explicit
 ' Description=Update missing playcounts from Last.fm
 ' Language=VBScript
 ' ScriptType=0 
+'
+'
+' Changes: 1.12
+' - Fix: More graceful xml checking, should catch ALL Invalid characters
 '
 ' Changes: 1.11
 ' - Fix: More infalid xml characters checked
@@ -76,7 +80,7 @@ Option Explicit
 '* Update LastPlayed time as well (if none exists)
 '* Fix the update file writing to account for strange characters
 
-Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = True, Timeout = 25
+Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
 
 
 Sub LastFMImport
@@ -97,6 +101,10 @@ Sub LastFMImport
 
 	dim uname
 	uname=InputBox("Enter your Last.fm username:")
+
+	If uname = "" Then
+		Exit Sub
+	End If
 
 	Set ArtistsL = CreateObject("Scripting.Dictionary")
 
@@ -281,7 +289,8 @@ Sub LastFMImport
 						On Error Goto 0
 						logme ArtistName & VBTab & Item.Title & VBTab & PlayCount & VBTab & list.Item(x).PlayCounter
 						
-						SDB.ProcessMessages
+						SDB.ProcessMessages						' Uncomment below to update LastPlayed times to now.
+						' list.item(x).LastPlayed=now()
 						list.Item(x).PlayCounter = PlayCount
 						SDB.ProcessMessages
 						
@@ -521,7 +530,7 @@ End Function
 
 Function fixurl(sRawURL)
 	' Original psyxonova improved by trixmoto
-	logme ">> fixurl() entered with: " & sRawURL
+	'logme ">> fixurl() entered with: " & sRawURL
 	Const sValidChars = "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\/!&:."
 	sRawURL = Replace(sRawURL,"+","%2B")
 
@@ -565,17 +574,21 @@ Function fixurl(sRawURL)
 		SDB.ProcessMessages
     Loop
 	End If
-	logme "<< fixurl will return with: " & fixurl
+	'logme "<< fixurl will return with: " & fixurl
 End Function
 
-Function stripInvalid(str)
-	Dim re, newStr, invalidChars
-	Set re = new regexp
 
+
+
+Function stripInvalid(str)
+	Dim re, newStr, i
+
+	Set re = new regexp
+	Const invalidChars = "[\0\1\2\3\4\5\6\7\10\13\14\16\17\20\21\22\23\24\25\26\27\30\31\32\33\34\35\36\37]"
 	newStr = str
-	' Need to do this better....
-	invalidChars = Chr(1) & Chr(5) & Chr(6) & Chr(7) & Chr(12) & Chr(15) & Chr(16) & Chr(17) & Chr(23) & Chr(25) & Chr(31)
-	re.Pattern = "[" & invalidChars & "]"
+	' Invalid: 0<=i<=8 or 11<=i<=12 or 14<=i<=31
+	' Octal pattern of invalid chars
+	re.Pattern = invalidChars
 	Do While re.Test(newStr) = True
 		newStr = re.Replace(newStr,"")
 		'logme "==============Invalid character on this one!!???"
@@ -585,7 +598,10 @@ Function stripInvalid(str)
 
 	'logme "New text: " & VbCrLf & newStr & VbCrLf & "============================"
 	stripInvalid = newStr
-End Function
+End Function 
+
+
+
 
 '************************************************************'
 
