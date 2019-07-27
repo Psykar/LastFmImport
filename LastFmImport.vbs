@@ -5,24 +5,15 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "2.0"
+  Dim Version : Version = "2.1"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
 ' 
-' INSTALL: Copy to Scripts directory and add the following to Scripts.ini 
-'          Don't forget to remove comments (') and set the order appropriately
 '
-'
-' [LastFmImport]
-' FileName=LastFmImport.vbs
-' ProcName=LastFmImport
-' Order=7
-' DisplayName=Last FM Playcount Importer
-' Description=Update missing playcounts from Last.fm
-' Language=VBScript
-' ScriptType=0 
-'
+' Changes: 2.1
+' - Caches XML files locally for faster re-runs
+' - Added retry option for HTTP timeouts
 '
 ' Changes: 2.0
 ' - Added support for updating last played times - these will be up to a week out though
@@ -80,9 +71,14 @@ Option Explicit
 '
 'ToDo:
 '* Better UI
-'* ???
+'  o Checkbox for updating last played times
+'* Retry HTTP a few times before timing out
+'* Move all files modified into %appdata%
+'* Possibly use  sdb.ScriptsPath instead ?
 
 Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
+Dim oShell : Set oShell = CreateObject( "WScript.Shell" )
+Dim ScriptFileSaveLocation : ScriptFileSaveLocation = oShell.ExpandEnvironmentStrings("%AppData%")&"\MediaMonkey\LastFmImport\"
 
 Class TrackDetailsContainer
 	Public Plays
@@ -248,7 +244,7 @@ Sub LastFMImport
 	
 
 	Set fso = CreateObject("Scripting.FileSystemObject")
-	Set updatef = fso.OpenTextFile(Script.ScriptPath&".Updated.txt",ForWriting,True)
+	Set updatef = fso.OpenTextFile(ScriptFileSaveLocation&"Updated.txt",ForWriting,True)
 
 	updatef.WriteLine "Artist" & VBTab & "Track" & VBTab & "New Plays / Timestamp" & VBTab & "Old Plays / Timestamp"
 	For Each ArtistName In ArtistsL.Keys
@@ -385,29 +381,95 @@ Function LoadXML(User,Mode,DFrom,DTo)
 	'LoadXML accepts input string and mode, returns xmldoc of requested string and mode'
 	'http://msdn2.microsoft.com/en-us/library/aa468547.aspx'
 	logme ">> LoadXML: Begin with " & User & " & " & Mode
-	Dim xmlDoc, xmlURL, StatusBar, LoadXMLBar, StartTimer, http, strippedText
-	StartTimer = Timer
+	Dim LoadedXML
 
 	Select Case Mode
 		
 
 		Case "ChartList"		'User Weekly Tracks Chart List
-			xmlURL = "http://ws.audioscrobbler.com/2.0/?method=user.getWeeklyChartList&user=" &_
-				fixurl(user) & "&api_key=daadfc9c6e9b2c549527ccef4af19adb"
+			' Never cache the chart list
+			Set LoadXML = LoadXMLWebsite("http://ws.audioscrobbler.com/2.0/?method=user.getWeeklyChartList&user=" &_
+				fixurl(user) & "&api_key=daadfc9c6e9b2c549527ccef4af19adb")
+				
+				
 		Case "TrackChart"		'User Weekly Tracks Chart
-			xmlURL = "http://ws.audioscrobbler.com/2.0/?method=user.getweeklytrackchart&user=" &_
-				fixurl(user) & "&api_key=daadfc9c6e9b2c549527ccef4af19adb&from=" & fixurl(dfrom) &_
-				"&to=" & fixurl(dto)
-		
+			' Try and find the local version and parse it
+			
+			Set LoadedXML = LoadXMLFile(User,Mode,DFrom,DTo)
+			
+			If (LoadedXML Is Nothing) Then
+				' File isn't cached or errored, Have to get from the website
+				
+				Set LoadedXML = LoadXMLWebsite("http://ws.audioscrobbler.com/2.0/?method=user.getweeklytrackchart&user=" &_
+					fixurl(user) & "&api_key=daadfc9c6e9b2c549527ccef4af19adb&from=" & fixurl(dfrom) &_
+					"&to=" & fixurl(dto))
+				' Now cache the XML
+				Do While (LoadedXML Is Nothing)
+					If MsgBox("Could not load XML from website, retry?",4) = 7 Then
+						' Don't retry
+						Set LoadXML = Nothing
+						Exit Function
+					Else
+						' Retry
+						Set LoadedXML = LoadXMLWebsite("http://ws.audioscrobbler.com/2.0/?method=user.getweeklytrackchart&user=" &_
+							fixurl(user) & "&api_key=daadfc9c6e9b2c549527ccef4af19adb&from=" & fixurl(dfrom) &_
+							"&to=" & fixurl(dto))
+					End If
+				Loop
+				Call SaveXMLFile(LoadedXML,User,Mode,DFrom,DTo)
+				
+				
+				
+			End If
+			Set LoadXML = LoadedXML
 
 	Case Else
 		msgbox("Invalid MODE was passed to LoadXML(Input, Mode)")
 		Exit Function
 	End Select
+		
+	
+	'logme "<< LoadXML: Finished in --> " & Int(Timer-StartTimer)
+
+End Function
+
+Function LoadXMLFile(User,Mode,DFrom,DTo)
+	
+	Dim fso, filepath, file, oShell,strippedText
+	Set fso = CreateObject("Scripting.FileSystemObject")
+	
+	
+	
+	If Not fso.folderexists(ScriptFileSaveLocation) Then
+		fso.CreateFolder(ScriptFileSaveLocation)
+	End If
+	filepath = ScriptFileSaveLocation&User&"-"&Mode&"-"&DFrom&"-"&DTo&".xml"
+	
+	logme "Attempting to load XML from: "&filepath
+	
+	If fso.FileExists(filepath) Then	
+		Set file = fso.OpenTextFile(filepath,ForReading,False,-1) ' -1 for Unicode
+		If Not file.AtEndOfStream Then
+			strippedText = stripInvalid(file.readAll)
+		Else
+			strippedText = ""
+		End If
+		logme ">> About to parse"
+		Set LoadXMLFile = ParseXML(strippedText)
+		
+	Else
+		Set LoadXMLFile = Nothing
+	End If
+		
+		
+End Function
+
+Function LoadXMLWebsite(xmlURL)
+	Dim http, strippedText, StartTimer
 	
 	logme ">> URL: " & xmlURL
 
-	Set xmlDoc = CreateObject("MSXML2.DOMDocument.3.0")
+
 	Set http = CreateObject("Microsoft.XmlHttp")
 	
 	http.open "GET",xmlURL,True
@@ -423,17 +485,48 @@ Function LoadXML(User,Mode,DFrom,DTo)
 	  Loop
 
 	  If (http.readyState <> 4) Then
-		MsgBox ("HTTP request timed out. No tracks updated")
-		Set LoadXML = Nothing
+		'MsgBox ("HTTP request timed out. No tracks updated")
+		Set LoadXMLWebsite = Nothing
 		Exit Function
 	End If
 
 	strippedText = stripInvalid(http.responseText)
 	'MsgBox "Post Text: " & strippedText
+	
+	Set LoadXMLWebsite = ParseXML(strippedText)
+End Function
 
+Function SaveXMLFile(xmlDoc,User,Mode,DFrom,DTo)
+	Dim fso, filepath, file
+	
+	Set fso = CreateObject("Scripting.FileSystemObject")
+	
+	If Not fso.folderexists(ScriptFileSaveLocation) Then
+		fso.CreateFolder(ScriptFileSaveLocation)
+	End If
+	filepath = ScriptFileSaveLocation&User&"-"&Mode&"-"&DFrom&"-"&DTo&".xml"
+	
+	
+	If Not fso.FileExists(filepath) Then
+		' XML file isn't already cached, save it now
+		
+		Set file = fso.OpenTextFile(filepath,ForWriting,True,-1)	 '-1 for opening as Unicode
+		file.write(xmlDoc.xml)
+		file.Close
+	End If	
+	logme "Saving xmlfile: "&filepath
+	Set SaveXMLFile = xmlDoc
+End Function
+
+Function ParseXML(strippedText)
+	logme "Parsing...."
+	Dim StartTimer, xmlDoc
+	
+	Set xmlDoc = CreateObject("MSXML2.DOMDocument.3.0")
 	xmlDoc.async = True 
 	xmlDoc.LoadXML(strippedText)
 
+	logme "Starting timer!"
 	StartTimer = Timer
 	'Wait for up to 3 seconds if we've not gotten the data yet
 	  Do While xmlDoc.readyState <> 4 And Int(Timer-StartTimer) < Timeout
@@ -445,8 +538,8 @@ Function LoadXML(User,Mode,DFrom,DTo)
 	If (xmlDoc.parseError.errorCode <> 0) Then
 		Dim myErr
 		Set myErr = xmlDoc.parseError
-		MsgBox("You have an error: " & myErr.reason)
-		Set LoadXML = Nothing
+		'MsgBox("You have an error: " & myErr.reason)
+		Set ParseXML = Nothing
 	Else
 		Dim currNode
 		Set currNode = xmlDoc.documentElement.childNodes.Item(0)
@@ -467,18 +560,16 @@ Function LoadXML(User,Mode,DFrom,DTo)
 	'logme " xmlDoc: returned from loop in: " & (Timer - StartTimer)
 
 	If xmlDoc.readyState = 4 and xmlDoc.parseError.errorCode = 0 Then 'all ok
-		Set LoadXML = xmlDoc
+		Set ParseXML = xmlDoc
+		'Save xml document cache
+		
 		'msgbox("Last.FM query took: " & (timer-starttimer))
 	Else
 		'logme "Last.FM Query Failed @ " & Int(Timer-StartTimer) &	"ReadyState: " & xmlDoc.ReadyState & " URL: " & xmlURL
-		msgbox("Last.FM Query Failed")
-		Set LoadXML = Nothing 
+		'msgbox("Last.FM Query Failed")
+		Set ParseXML = Nothing 
 	End if
-
-	'logme "<< LoadXML: Finished in --> " & Int(Timer-StartTimer)
-
 End Function
-
 '******************************************************************
 '**************** Library Query  **********************************
 '******************************************************************
@@ -556,7 +647,7 @@ Sub logme(msg)
 		On Error Resume Next
 		Set fso = CreateObject("Scripting.FileSystemObject")
 		'msgbox("logging: " & msg)
-		Set logf = fso.OpenTextFile(Script.ScriptPath&".log",ForAppending,True)
+		Set logf = fso.OpenTextFile(ScriptFileSaveLocation&"debug.log",ForAppending,True)
 		logf.WriteLine Now() & ": " & msg
 		Set fso = Nothing
 		Set logf = Nothing
