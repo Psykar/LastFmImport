@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.5"
+  Dim Version : Version = "1.6"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -22,6 +22,10 @@ Option Explicit
 ' Description=Update missing playcounts from Last.fm
 ' Language=VBScript
 ' ScriptType=0 
+'
+' Changes: 1.6
+' - Fix: No longer case sensitive for track names
+' - Fix: Error messages on timeouts are more helpful
 '
 ' Changes: 1.5
 ' Better logging - by default a log file will be created listing tracks updated
@@ -122,7 +126,7 @@ Sub LastFMImport
 			
 				For Each Ele in TrackChartXML.GetElementsByTagName("lfm").item(0).GetElementsByTagName("track")
 
-					TrackTitle = Ele.ChildNodes(1).Text
+					TrackTitle = LCase(Ele.ChildNodes(1).Text)
 					ArtistName = Ele.ChildNodes(0).ChildNodes(0).Text
 					PlayCount = CInt(Ele.ChildNodes(3).Text)
 
@@ -223,9 +227,9 @@ Sub LastFMImport
 
 				' Check if this track was on last.fm
 
-				If ArtistTrackList.Exists(Item.Title) Then
+				If ArtistTrackList.Exists(LCase(Item.Title)) Then
 					SDB.ProcessMessages
-					PlayCount = ArtistTrackList.Item(Item.Title)
+					PlayCount = ArtistTrackList.Item(LCase(Item.Title))
 					SDB.ProcessMessages
 
 					Matches = Matches + 1
@@ -327,14 +331,26 @@ Function LoadXML(User,Mode,DFrom,DTo)
 		SDB.ProcessMessages
 	  Loop
 
+	  If (http.readyState <> 4) Then
+		MsgBox ("HTTP request timed out.")
+	End If
+
 
 	xmlDoc.async = True 
 	xmlDoc.LoadXML(http.responseText)
 
+	StartTimer = Timer
+	'Wait for up to 3 seconds if we've not gotten the data yet
+	  Do While xmlDoc.readyState <> 4 And Int(Timer-StartTimer) < Timeout
+		SDB.ProcessMessages
+		SDB.Tools.Sleep 100
+		SDB.ProcessMessages
+	  Loop
+
 	If (xmlDoc.parseError.errorCode <> 0) Then
 		Dim myErr
 		Set myErr = xmlDoc.parseError
-		MsgBox("You have error " & myErr.reason)
+		MsgBox("You have an error: " & myErr.reason)
 	Else
 		Dim currNode
 		Set currNode = xmlDoc.documentElement.childNodes.Item(0)
