@@ -10,6 +10,9 @@ Option Explicit
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
 ' 
+' Changes: 2.4
+' - OMG bad typo
+'
 ' Changes: 2.3
 ' - Fixed log file directory creation
 '
@@ -81,7 +84,9 @@ Option Explicit
 Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
 Dim oShell : Set oShell = CreateObject( "WScript.Shell" )
 Dim ScriptFileSaveLocation : ScriptFileSaveLocation = SDB.ScriptsPath&"LastFmImport\"
+Dim fso
 
+Set fso = CreateObject("Scripting.FileSystemObject")
 If Not fso.folderexists(ScriptFileSaveLocation) Then
 	fso.CreateFolder(ScriptFileSaveLocation)
 End If
