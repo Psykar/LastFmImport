@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.3"
+  Dim Version : Version = "1.4"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -22,6 +22,10 @@ Option Explicit
 ' Description=Update missing playcounts from Last.fm
 ' Language=VBScript
 ' ScriptType=0 
+'
+' Changes: 1.4
+' - HUGE speedup - no more .updateall() rather only update the track that needs it with
+'   updateDB()
 '
 ' Changes: 1.3
 ' - Database lookup optimizations (I hope!)
@@ -139,13 +143,16 @@ Sub LastFMImport
 			Else
 				msgbox("did not get any matches from Chart tracks xml")
 			End If
+			SDB.ProcessMessages
 
 		Next
+		SDB.ProcessMessages
 
 	Else
 		'logme "TracksListXML did not appear to load.. check loadxml() or network connection"
 		msgbox ("Failed to get XML from LoadXML()")
 	End If
+	SDB.ProcessMessages
 
 
 	ArtistMatches = 0
@@ -161,62 +168,94 @@ Sub LastFMImport
 
 
 	For Each ArtistName In ArtistsL.Keys
-		Dim list
+		Dim list, ArtistTrackList
+		SDB.ProcessMessages
 		StatusBar.Increase
 		StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName
+		SDB.ProcessMessages
+		'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName
 		If StatusBar.Terminate Then
 			Exit For
 		End If
 
-		Tracks = Tracks + ArtistsL.Item(ArtistName).Count
+		SDB.ProcessMessages
+		Set ArtistTrackList = ArtistsL.Item(ArtistName)
+		SDB.ProcessMessages
+		Tracks = Tracks + ArtistTrackList.Count
+		SDB.ProcessMessages
 
 		'Get all tracks in database by this artist
 		Set list = QueryLibrary (ArtistName)
+		SDB.ProcessMessages
 
 		If list.Count > 0 Then
 			Dim x
-			
+			SDB.ProcessMessages
 			ArtistMatches = ArtistMatches + 1
 
 			For x = 0 To list.Count-1
-
-
-				
-				
+				Dim Item				
+				SDB.ProcessMessages
+				'logme "Loading next track by artist"
+				Set Item = list.Item(x)
+				SDB.ProcessMessages
 				StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName &_
 					" - " & list.Item(x).Title
+				'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName & " - " & list.Item(x).Title
+				SDB.ProcessMessages
 				If StatusBar.Terminate Then
 					Exit For
 				End If
 
 				' Check if this track was on last.fm
-				If ArtistsL.Item(ArtistName).Exists(list.Item(x).Title) Then
-					PlayCount = ArtistsL.Item(ArtistName).Item(list.Item(x).Title)
-						
+
+				If ArtistTrackList.Exists(Item.Title) Then
+					SDB.ProcessMessages
+					PlayCount = ArtistTrackList.Item(Item.Title)
+					SDB.ProcessMessages
 
 					Matches = Matches + 1
 
-					logme " === Found: " & ArtistName & " - " & list.Item(x).Title & " PlayCount = " & PlayCount
-					logme " === Previous plays: " & list.Item(x).PlayCounter
+					'logme " === Found: " & ArtistName & " - " & list.Item(x).Title & " PlayCount = " & PlayCount
+					'logme " === Previous plays: " & list.Item(x).PlayCounter
 
-					If list.Item(x).PlayCounter < PlayCount Then 'Increase play count 
-							StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_
-								" -> MATCH: " & ArtistName & " - " & TrackTitle
+					If Item.PlayCounter < PlayCount Then 'Increase play count 
+						StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_
+								" -> MATCH: " & ArtistName & " - " & Item.Title
+						logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &	" -> "
+						logme "		MATCH: " & ArtistName & " - " & Item.Title
+						logme " PlayCount = " & PlayCount & " Previous plays: " & list.Item(x).PlayCounter	
+						
+						SDB.ProcessMessages
 						list.Item(x).PlayCounter = PlayCount
+						SDB.ProcessMessages
 						Updated = Updated + 1
 						logme " ==== Updating"
+						SDB.ProcessMessages
+						Item.UpdateDB()
 					Else
-							StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_
-								" -> SKIP: " & ArtistName & " - " & TrackTitle
-						logme " ==== Skipping"
+						StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_
+								" -> SKIP: " & ArtistName & " - " & Item.Title
+						'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_								" -> SKIP: " & ArtistName & " - " & Item.Title
+						'logme " ==== Skipping"
+						SDB.ProcessMessages
 
 					End If
 					SDB.ProcessMessages
+				Else
+					SDB.ProcessMessages
+					'logme " === Track not found: " & ArtistName & " - " & Item.Title
+					
 				End If
+				SDB.ProcessMessages
 			Next
+			SDB.ProcessMessages
+		Else
+			SDB.ProcessMessages
+			'logme "Artist does not exist: " & ArtistName
+			SDB.ProcessMessages
 		End If
-		list.UpdateAll
-		
+		SDB.ProcessMessages
 	Next
 	MsgBox  Plays & " Plays found on Last.fm consisting of " & Tracks & " tracks by " & Artists & " artists." & VbCrLf &_
 		ArtistMatches & " of these artists were in the local database, along with " & Matches & " of their tracks." & VbCrLf &_
@@ -258,9 +297,18 @@ Function LoadXML(User,Mode,DFrom,DTo)
 	Set xmlDoc = CreateObject("MSXML2.DOMDocument.3.0")
 	Set http = CreateObject("Microsoft.XmlHttp")
 	
-	http.open "GET",xmlURL,False
+	http.open "GET",xmlURL,True
 	http.send ""
 	
+
+	StartTimer = Timer
+	'Wait for up to 3 seconds if we've not gotten the data yet
+	  Do While http.readyState <> 4 And Int(Timer-StartTimer) < Timeout
+		SDB.ProcessMessages
+		SDB.Tools.Sleep 100
+		SDB.ProcessMessages
+	  Loop
+
 
 	xmlDoc.async = True 
 	xmlDoc.LoadXML(http.responseText)
@@ -277,7 +325,7 @@ Function LoadXML(User,Mode,DFrom,DTo)
 	'logme " xmlDoc.Load: Waiting for Last.FM to return " & Mode & " of " & User
 	SDB.ProcessMessages
 
-	
+	StartTimer = Timer
 	Do While xmlDoc.readyState <> 4 And Int(Timer-StartTimer) < Timeout
 		SDB.ProcessMessages
 		SDB.Tools.Sleep 100
@@ -292,8 +340,7 @@ Function LoadXML(User,Mode,DFrom,DTo)
 		Set LoadXML = xmlDoc
 		'msgbox("Last.FM query took: " & (timer-starttimer))
 	Else
-		logme "Last.FM Query Failed @ " & Int(Timer-StartTimer) &_
-		"ReadyState: " & xmlDoc.ReadyState & " URL: " & xmlURL
+		'logme "Last.FM Query Failed @ " & Int(Timer-StartTimer) &	"ReadyState: " & xmlDoc.ReadyState & " URL: " & xmlURL
 		msgbox("Last.FM Timed Out @ " & Int(Timer-StartTimer))
 		Set LoadXML = Nothing 
 	End if
@@ -307,7 +354,7 @@ End Function
 '******************************************************************
 
 Function AddFilter()
-	''logme " AddFilter(): Begin"
+	'logme " AddFilter(): Begin"
 	'Add currently active filter to query if any'
 
 	Dim GetFilter : GetFilter = SDB.Database.ActiveFilterQuery  
