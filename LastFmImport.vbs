@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.8"
+  Dim Version : Version = "1.9"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -22,6 +22,9 @@ Option Explicit
 ' Description=Update missing playcounts from Last.fm
 ' Language=VBScript
 ' ScriptType=0 
+'
+' Changes: 1.9
+' - Fix: Last.FM usernames not parsing correctly if containing special chars
 '
 ' Changes: 1.8
 ' - Fix: Invalid ASCII characters stripped (hopefully - let me know if you find more!)
@@ -508,7 +511,7 @@ End Function
 
 Function fixurl(sRawURL)
 	' Original psyxonova improved by trixmoto
-	'logme ">> fixurl() entered with: " & sRawURL
+	logme ">> fixurl() entered with: " & sRawURL
 	Const sValidChars = "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\/!&:."
 	sRawURL = Replace(sRawURL,"+","%2B")
 
@@ -529,7 +532,7 @@ Function fixurl(sRawURL)
 					s = "+"
 				Else
 					If d < 128 Then
-						s = DecToHex(d)
+						s = Hex(d)
 					Else
 						s = DecToUtf(d)
 					End If
@@ -552,7 +555,7 @@ Function fixurl(sRawURL)
 		SDB.ProcessMessages
     Loop
 	End If
-	'logme "<< fixurl will return with: " & fixurl
+	logme "<< fixurl will return with: " & fixurl
 End Function
 
 Function stripInvalid(str)
