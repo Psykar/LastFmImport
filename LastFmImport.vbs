@@ -5,15 +5,14 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "2.1"
+  Dim Version : Version = "2.2"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
 ' 
+' Changes: 2.2
+' - Fixed log file save path error
 '
-' Changes: 2.1
-' - Caches XML files locally for faster re-runs
-' - Added retry option for HTTP timeouts
 '
 ' Changes: 2.0
 ' - Added support for updating last played times - these will be up to a week out though
@@ -78,7 +77,7 @@ Option Explicit
 
 Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
 Dim oShell : Set oShell = CreateObject( "WScript.Shell" )
-Dim ScriptFileSaveLocation : ScriptFileSaveLocation = oShell.ExpandEnvironmentStrings("%AppData%")&"\MediaMonkey\LastFmImport\"
+Dim ScriptFileSaveLocation : ScriptFileSaveLocation = SDB.ScriptsPath&"LastFmImport\"
 
 Class TrackDetailsContainer
 	Public Plays
