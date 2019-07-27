@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.6"
+  Dim Version : Version = "1.7"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -22,6 +22,10 @@ Option Explicit
 ' Description=Update missing playcounts from Last.fm
 ' Language=VBScript
 ' ScriptType=0 
+'
+' Changes: 1.7
+' - Fix: Invalid apostrophes stripped, sadly this will make things less accurate
+'	but will reduce error messages for the moment
 '
 ' Changes: 1.6
 ' - Fix: No longer case sensitive for track names
@@ -53,6 +57,7 @@ Option Explicit
 'ToDo:
 '* Smarter checking of files to update
 '* Update LastPlayed time as well (if none exists)
+'* Better fix for apostrophes needed
 
 Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
 
@@ -295,8 +300,8 @@ End Sub
 Function LoadXML(User,Mode,DFrom,DTo)
 	'LoadXML accepts input string and mode, returns xmldoc of requested string and mode'
 	'http://msdn2.microsoft.com/en-us/library/aa468547.aspx'
-	'logme ">> LoadXML: Begin with " & User & " & " & Mode
-	Dim xmlDoc, xmlURL, StatusBar, LoadXMLBar, StartTimer, http
+	logme ">> LoadXML: Begin with " & User & " & " & Mode
+	Dim xmlDoc, xmlURL, StatusBar, LoadXMLBar, StartTimer, http, strippedText
 	StartTimer = Timer
 
 	Select Case Mode
@@ -315,6 +320,8 @@ Function LoadXML(User,Mode,DFrom,DTo)
 		msgbox("Invalid MODE was passed to LoadXML(Input, Mode)")
 		Exit Function
 	End Select
+	
+	logme ">> URL: " & xmlURL
 
 	Set xmlDoc = CreateObject("MSXML2.DOMDocument.3.0")
 	Set http = CreateObject("Microsoft.XmlHttp")
@@ -335,9 +342,12 @@ Function LoadXML(User,Mode,DFrom,DTo)
 		MsgBox ("HTTP request timed out.")
 	End If
 
+	logme "Testing "
+	strippedText = stripInvalid(http.responseText)
+	'MsgBox "Post Text: " & strippedText
 
 	xmlDoc.async = True 
-	xmlDoc.LoadXML(http.responseText)
+	xmlDoc.LoadXML(strippedText)
 
 	StartTimer = Timer
 	'Wait for up to 3 seconds if we've not gotten the data yet
@@ -526,6 +536,20 @@ Function fixurl(sRawURL)
 	'logme "<< fixurl will return with: " & fixurl
 End Function
 
+Function stripInvalid(str)
+	Dim re, newStr
+	Set re = new regexp
+
+
+	re.Pattern = "\x19"
+	newStr = str
+	Do While re.Test(newStr) = True
+		newStr = re.Replace(newStr,"")
+		logme "==============Invalid character on this one!!???"
+	Loop
+	logme "New text: " & VbCrLf & newStr & VbCrLf & "============================"
+	stripInvalid = newStr
+End Function
 
 '************************************************************'
 
