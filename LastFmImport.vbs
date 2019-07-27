@@ -5,11 +5,14 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "2.2"
+  Dim Version : Version = "2.3"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
 ' 
+' Changes: 2.3
+' - Fixed log file directory creation
+'
 ' Changes: 2.2
 ' - Fixed log file save path error
 '
@@ -78,6 +81,11 @@ Option Explicit
 Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
 Dim oShell : Set oShell = CreateObject( "WScript.Shell" )
 Dim ScriptFileSaveLocation : ScriptFileSaveLocation = SDB.ScriptsPath&"LastFmImport\"
+
+If Not fso.folderexists(ScriptFileSaveLocation) Then
+	fso.CreateFolder(ScriptFileSaveLocation)
+End If
+
 
 Class TrackDetailsContainer
 	Public Plays
@@ -437,11 +445,6 @@ Function LoadXMLFile(User,Mode,DFrom,DTo)
 	Dim fso, filepath, file, oShell,strippedText
 	Set fso = CreateObject("Scripting.FileSystemObject")
 	
-	
-	
-	If Not fso.folderexists(ScriptFileSaveLocation) Then
-		fso.CreateFolder(ScriptFileSaveLocation)
-	End If
 	filepath = ScriptFileSaveLocation&User&"-"&Mode&"-"&DFrom&"-"&DTo&".xml"
 	
 	logme "Attempting to load XML from: "&filepath
@@ -500,9 +503,6 @@ Function SaveXMLFile(xmlDoc,User,Mode,DFrom,DTo)
 	
 	Set fso = CreateObject("Scripting.FileSystemObject")
 	
-	If Not fso.folderexists(ScriptFileSaveLocation) Then
-		fso.CreateFolder(ScriptFileSaveLocation)
-	End If
 	filepath = ScriptFileSaveLocation&User&"-"&Mode&"-"&DFrom&"-"&DTo&".xml"
 	
 	
