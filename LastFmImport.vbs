@@ -23,6 +23,9 @@ Option Explicit
 ' Language=VBScript
 ' ScriptType=0 
 '
+' Changes: 1.10
+' - Fix: More invalid xml characters checked
+'
 ' Changes: 1.9
 ' - Fix: Last.FM usernames not parsing correctly if containing special chars
 '
@@ -563,8 +566,8 @@ Function stripInvalid(str)
 	Set re = new regexp
 
 	newStr = str
-
-	invalidChars = Chr(12) & Chr(7) & Chr(5) & Chr(6) & Chr(16) & Chr(15) & Chr(25)
+	' Need to do this better....
+	invalidChars = Chr(5) & Chr(6) & Chr(7) & Chr(12) & Chr(15) & Chr(16) & Chr(17) & Chr(23) & Chr(25) & Chr(31)
 	re.Pattern = "[" & invalidChars & "]"
 	Do While re.Test(newStr) = True
 		newStr = re.Replace(newStr,"")
