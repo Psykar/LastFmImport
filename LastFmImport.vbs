@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.9"
+  Dim Version : Version = "1.11"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -22,6 +22,10 @@ Option Explicit
 ' Description=Update missing playcounts from Last.fm
 ' Language=VBScript
 ' ScriptType=0 
+'
+' Changes: 1.11
+' - Fix: More infalid xml characters checked
+' - More graceful exits when errors occur
 '
 ' Changes: 1.10
 ' - Fix: More invalid xml characters checked
@@ -72,7 +76,7 @@ Option Explicit
 '* Update LastPlayed time as well (if none exists)
 '* Fix the update file writing to account for strange characters
 
-Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
+Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = True, Timeout = 25
 
 
 Sub LastFMImport
@@ -100,13 +104,14 @@ Sub LastFMImport
 	Set ChartListXML = LoadXML(uname, "ChartList","","")
 	SDB.ProcessMessages
 
-	If Not ChartListXML.getElementsByTagName("lfm").item(0).getAttribute("status") = "ok" Then
-		MsgBox "Error" & VbCrLf & ChartListXML.getElementsByTagName("lfm").item(0).getElementsByTagName("error").item(0).text
-		Exit Sub
-	End If
+
 
 
 	If Not (ChartListXML Is Nothing) Then
+		If Not ChartListXML.getElementsByTagName("lfm").item(0).getAttribute("status") = "ok" Then
+			MsgBox "Error" & VbCrLf & ChartListXML.getElementsByTagName("lfm").item(0).getElementsByTagName("error").item(0).text
+			Exit Sub
+		End If
 		'logme " ChartListXML appears to be OK, proceeding with loading each weeks data"
 		StatusBar.Text = "Loading Weekly Charts List -> OK"
 		Dim Elem
@@ -128,16 +133,17 @@ Sub LastFMImport
 			DEnd = Elem.getAttribute("to")
 
 
-			'logme " Attributes: " & DStart & " " & DEnd
+			logme " Attributes: " & DStart & " " & DEnd
 			Set TrackChartXML = LoadXML(uname, "TrackChart",DStart,DEnd)
 			SDB.ProcessMessages
-			If Not TrackChartXML.getElementsByTagName("lfm").item(0).getAttribute("status") = "ok" Then
-				MsgBox "Error" & VbCrLf &  TrackListXML.getElementsByTagName("lfm").item(0).getElementsByTagName("error").item(0).text
-				Exit Sub
-			End If
+
 
 
 			If NOT (TrackChartXML Is Nothing) Then
+				If Not TrackChartXML.getElementsByTagName("lfm").item(0).getAttribute("status") = "ok" Then
+					MsgBox "Error" & VbCrLf &  TrackListXML.getElementsByTagName("lfm").item(0).getElementsByTagName("error").item(0).text
+					Exit Sub
+				End If
 				'logme "TrackChartXML appears to be OK, proceeding"
 				Dim Ele, TrackTitle, ArtistName, PlayCount
 
@@ -173,7 +179,7 @@ Sub LastFMImport
 					
 				Next
 			Else
-				msgbox("did not get any matches from Chart tracks xml")
+				Exit Sub
 			End If
 			SDB.ProcessMessages
 
@@ -181,7 +187,7 @@ Sub LastFMImport
 		SDB.ProcessMessages
 
 	Else
-		'logme "TracksListXML did not appear to load.. check loadxml() or network connection"
+		logme "TracksListXML did not appear to load.. check loadxml() or network connection"
 		msgbox ("Failed to get XML from LoadXML()")
 	End If
 	SDB.ProcessMessages
@@ -364,10 +370,10 @@ Function LoadXML(User,Mode,DFrom,DTo)
 
 	  If (http.readyState <> 4) Then
 		MsgBox ("HTTP request timed out. No tracks updated")
-		WScript.Quit
+		Set LoadXML = Nothing
+		Exit Function
 	End If
 
-	logme "Testing "
 	strippedText = stripInvalid(http.responseText)
 	'MsgBox "Post Text: " & strippedText
 
@@ -386,6 +392,7 @@ Function LoadXML(User,Mode,DFrom,DTo)
 		Dim myErr
 		Set myErr = xmlDoc.parseError
 		MsgBox("You have an error: " & myErr.reason)
+		Set LoadXML = Nothing
 	Else
 		Dim currNode
 		Set currNode = xmlDoc.documentElement.childNodes.Item(0)
@@ -405,12 +412,12 @@ Function LoadXML(User,Mode,DFrom,DTo)
 
 	'logme " xmlDoc: returned from loop in: " & (Timer - StartTimer)
 
-	If xmlDoc.readyState = 4 Then 'all ok
+	If xmlDoc.readyState = 4 and xmlDoc.parseError.errorCode = 0 Then 'all ok
 		Set LoadXML = xmlDoc
 		'msgbox("Last.FM query took: " & (timer-starttimer))
 	Else
 		'logme "Last.FM Query Failed @ " & Int(Timer-StartTimer) &	"ReadyState: " & xmlDoc.ReadyState & " URL: " & xmlURL
-		msgbox("Last.FM Timed Out @ " & Int(Timer-StartTimer))
+		msgbox("Last.FM Query Failed")
 		Set LoadXML = Nothing 
 	End if
 
@@ -567,7 +574,7 @@ Function stripInvalid(str)
 
 	newStr = str
 	' Need to do this better....
-	invalidChars = Chr(5) & Chr(6) & Chr(7) & Chr(12) & Chr(15) & Chr(16) & Chr(17) & Chr(23) & Chr(25) & Chr(31)
+	invalidChars = Chr(1) & Chr(5) & Chr(6) & Chr(7) & Chr(12) & Chr(15) & Chr(16) & Chr(17) & Chr(23) & Chr(25) & Chr(31)
 	re.Pattern = "[" & invalidChars & "]"
 	Do While re.Test(newStr) = True
 		newStr = re.Replace(newStr,"")
