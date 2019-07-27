@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.4"
+  Dim Version : Version = "1.5"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -22,6 +22,12 @@ Option Explicit
 ' Description=Update missing playcounts from Last.fm
 ' Language=VBScript
 ' ScriptType=0 
+'
+' Changes: 1.5
+' Better logging - by default a log file will be created listing tracks updated
+'	this file is LastFmImport.vbs.Updated.txt located in the scripts folder and is 
+'	tab delimited.
+' Better status bar messages as well I would like to think
 '
 ' Changes: 1.4
 ' - HUGE speedup - no more .updateall() rather only update the track that needs it with
@@ -40,8 +46,9 @@ Option Explicit
 ' - Abstracted username
 ' - Pretty error messages
 '
-' TODO: 
-' * Smarter checking of files to update
+'ToDo:
+'* Smarter checking of files to update
+'* Update LastPlayed time as well (if none exists)
 
 Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
 
@@ -50,7 +57,10 @@ Sub LastFMImport
 	' Define variables
 	Dim TrackChartXML, ChartListXML, DStart, DEnd, ArtistsL, TracksL
 	' Stats variables
-	Dim Plays, Matches, Counter, Updated, Tracks, Artists, ArtistMatches
+	Dim Plays, Matches, Counter, Updated, Tracks, Artists, ArtistMatches, LastMatch
+	' Update logfile variables
+	Dim fso, updatef
+
 
   
 	' Status Bar
@@ -164,14 +174,19 @@ Sub LastFMImport
 	Artists = ArtistsL.Count
 	StatusBar.MaxValue = ArtistsL.Count
 	StatusBar.Text = "Checking Database for Matches..."
+	LastMatch = ""
 
+	
 
+	Set fso = CreateObject("Scripting.FileSystemObject")
+	Set updatef = fso.OpenTextFile(Script.ScriptPath&".Updated.txt",ForWriting,True)
 
+	updatef.WriteLine "Artist" & VBTab & "Track" & VBTab & "New Plays" & VBTab & "Old Plays"
 	For Each ArtistName In ArtistsL.Keys
 		Dim list, ArtistTrackList
 		SDB.ProcessMessages
 		StatusBar.Increase
-		StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName
+		StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & LastMatch
 		SDB.ProcessMessages
 		'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName
 		If StatusBar.Terminate Then
@@ -199,8 +214,7 @@ Sub LastFMImport
 				'logme "Loading next track by artist"
 				Set Item = list.Item(x)
 				SDB.ProcessMessages
-				StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName &_
-					" - " & list.Item(x).Title
+				StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & LastMatch
 				'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName & " - " & list.Item(x).Title
 				SDB.ProcessMessages
 				If StatusBar.Terminate Then
@@ -216,26 +230,30 @@ Sub LastFMImport
 
 					Matches = Matches + 1
 
-					'logme " === Found: " & ArtistName & " - " & list.Item(x).Title & " PlayCount = " & PlayCount
-					'logme " === Previous plays: " & list.Item(x).PlayCounter
+					logme " === Found: " & ArtistName & " - " & Item.Title & " PlayCount = " & PlayCount
+					logme " === Previous plays: " & Item.PlayCounter
+					logme " === LastPlayed: " & Item.LastPlayed
 
 					If Item.PlayCounter < PlayCount Then 'Increase play count 
-						StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_
-								" -> MATCH: " & ArtistName & " - " & Item.Title
-						logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &	" -> "
-						logme "		MATCH: " & ArtistName & " - " & Item.Title
-						logme " PlayCount = " & PlayCount & " Previous plays: " & list.Item(x).PlayCounter	
+						LastMatch = "Updating: " & ArtistName & " - " & Item.Title
+						Updated = Updated + 1
+
+						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & LastMatch
+						updatef.WriteLine ArtistName & VBTab & Item.Title & VBTab & PlayCount & VBTab & list.Item(x).PlayCounter
+						logme ArtistName & VBTab & Item.Title & VBTab & PlayCount & VBTab & list.Item(x).PlayCounter
 						
 						SDB.ProcessMessages
 						list.Item(x).PlayCounter = PlayCount
 						SDB.ProcessMessages
-						Updated = Updated + 1
+						
+						
 						logme " ==== Updating"
 						SDB.ProcessMessages
 						Item.UpdateDB()
+					ElseIf Item.LastPlayed = 0.0 Then
+							logme "Empty Last played"
 					Else
-						StatusBar.Text = "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_
-								" -> SKIP: " & ArtistName & " - " & Item.Title
+						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & LastMatch
 						'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_								" -> SKIP: " & ArtistName & " - " & Item.Title
 						'logme " ==== Skipping"
 						SDB.ProcessMessages
@@ -257,13 +275,13 @@ Sub LastFMImport
 		End If
 		SDB.ProcessMessages
 	Next
+	Set fso = Nothing
+	Set updatef = Nothing
 	MsgBox  Plays & " Plays found on Last.fm consisting of " & Tracks & " tracks by " & Artists & " artists." & VbCrLf &_
 		ArtistMatches & " of these artists were in the local database, along with " & Matches & " of their tracks." & VbCrLf &_
-		"Tracks updated = " & Updated & VbCrLf & " The rest had a play count higher than last.fm already."
+		"Tracks updated = " & Updated & VbCrLf & "The rest had a play count higher than last.fm already."
 	
 	SDB.ProcessMessages
-
-
 
 End Sub
 
@@ -432,6 +450,8 @@ Sub logme(msg)
 		Set logf = Nothing
 	End If
 End Sub
+
+
 
 Function CorrectSt(inString)
 ' 	'logme ">> CorrectSt() has started with parameters: " & inString
