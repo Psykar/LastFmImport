@@ -5,7 +5,7 @@ Option Explicit
 '
 ' SCRIPTNAME: Last.fm Playcount Import
 ' DEVELOPMENT STARTED: 2009.02.17
-  Dim Version : Version = "1.7"
+  Dim Version : Version = "1.8"
 
 ' DESCRIPTION: Imports play counts from last.fm to update playcounts in MM
 ' FORUM THREAD: http://www.mediamonkey.com/forum/viewtopic.php?f=2&t=15663&start=15#p191962
@@ -22,6 +22,13 @@ Option Explicit
 ' Description=Update missing playcounts from Last.fm
 ' Language=VBScript
 ' ScriptType=0 
+'
+' Changes: 1.8
+' - Fix: Invalid ASCII characters stripped (hopefully - let me know if you find more!)
+'	Thanks to SinDenial and AndréVonDrei for testing!
+' - More graceful error messages (for some, let me know if you get anything cryptic)
+' - Check for invalid characters when writing update file - some seem to cause errors
+'	when the actual update went fine - needs improvment
 '
 ' Changes: 1.7
 ' - Fix: Invalid apostrophes stripped, sadly this will make things less accurate
@@ -57,7 +64,7 @@ Option Explicit
 'ToDo:
 '* Smarter checking of files to update
 '* Update LastPlayed time as well (if none exists)
-'* Better fix for apostrophes needed
+'* Fix the update file writing to account for strange characters
 
 Const ForReading = 1, ForWriting = 2, ForAppending = 8, Logging = False, Timeout = 25
 
@@ -195,7 +202,7 @@ Sub LastFMImport
 		Dim list, ArtistTrackList
 		SDB.ProcessMessages
 		StatusBar.Increase
-		StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & LastMatch
+		StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & " Tracks " & LastMatch
 		SDB.ProcessMessages
 		'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName
 		If StatusBar.Terminate Then
@@ -223,7 +230,7 @@ Sub LastFMImport
 				'logme "Loading next track by artist"
 				Set Item = list.Item(x)
 				SDB.ProcessMessages
-				StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & LastMatch
+				StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & " Tracks " & LastMatch
 				'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue & " -> " & ArtistName & " - " & list.Item(x).Title
 				SDB.ProcessMessages
 				If StatusBar.Terminate Then
@@ -244,11 +251,22 @@ Sub LastFMImport
 					logme " === LastPlayed: " & Item.LastPlayed
 
 					If Item.PlayCounter < PlayCount Then 'Increase play count 
-						LastMatch = "Updating: " & ArtistName & " - " & Item.Title
+						LastMatch = " - Updating: " & ArtistName & " - " & Item.Title
 						Updated = Updated + 1
 
-						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & LastMatch
+						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & " Tracks " & LastMatch
+						
+						'Unfortunatly, some files can be updated with wierd tags, yet cause errors when writing status file
+						On Error Resume Next
 						updatef.WriteLine ArtistName & VBTab & Item.Title & VBTab & PlayCount & VBTab & list.Item(x).PlayCounter
+						If Err.Number <> 0 Then 
+							numErr =Err.Number
+							aboutErr = Err.description
+							MsgBox "An Error has occured! Error number " & numerr & " of the type '" & abouterr & "'." & VbCrLf &_
+								"Current artist was updated, but cannot be written to logfile."
+							Err.Clear
+						End If
+						On Error Goto 0
 						logme ArtistName & VBTab & Item.Title & VBTab & PlayCount & VBTab & list.Item(x).PlayCounter
 						
 						SDB.ProcessMessages
@@ -262,7 +280,7 @@ Sub LastFMImport
 					ElseIf Item.LastPlayed = 0.0 Then
 							logme "Empty Last played"
 					Else
-						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & LastMatch
+						StatusBar.Text = "Checking Database for Matches -> Updated: "  & Updated & "/" & Tracks & " Tracks " & LastMatch
 						'logme "Checking Database for Matches -> "  & StatusBar.Value & "/" & StatusBar.MaxValue &_								" -> SKIP: " & ArtistName & " - " & Item.Title
 						'logme " ==== Skipping"
 						SDB.ProcessMessages
@@ -339,7 +357,8 @@ Function LoadXML(User,Mode,DFrom,DTo)
 	  Loop
 
 	  If (http.readyState <> 4) Then
-		MsgBox ("HTTP request timed out.")
+		MsgBox ("HTTP request timed out. No tracks updated")
+		WScript.Quit
 	End If
 
 	logme "Testing "
@@ -537,17 +556,21 @@ Function fixurl(sRawURL)
 End Function
 
 Function stripInvalid(str)
-	Dim re, newStr
+	Dim re, newStr, invalidChars
 	Set re = new regexp
 
-
-	re.Pattern = "\x19"
 	newStr = str
+
+	invalidChars = Chr(12) & Chr(7) & Chr(5) & Chr(6) & Chr(16) & Chr(15) & Chr(25)
+	re.Pattern = "[" & invalidChars & "]"
 	Do While re.Test(newStr) = True
 		newStr = re.Replace(newStr,"")
-		logme "==============Invalid character on this one!!???"
+		'logme "==============Invalid character on this one!!???"
 	Loop
-	logme "New text: " & VbCrLf & newStr & VbCrLf & "============================"
+
+
+
+	'logme "New text: " & VbCrLf & newStr & VbCrLf & "============================"
 	stripInvalid = newStr
 End Function
 
